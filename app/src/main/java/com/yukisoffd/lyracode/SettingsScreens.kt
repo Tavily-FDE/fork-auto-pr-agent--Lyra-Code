@@ -96,6 +96,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
@@ -161,6 +162,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
@@ -411,7 +413,7 @@ internal fun SettingsScreen(
                 KimiDivider()
                 KimiMenuRow(Icons.Default.Cloud, "模型服务", "配置 AI 服务商、API Key 与默认模型") { detail = "model" }
                 KimiDivider()
-                KimiMenuRow(Icons.Default.Search, "联网搜索", "配置网站黑名单，过滤垃圾或不可信来源") { detail = "web_search" }
+                KimiMenuRow(Icons.Default.Search, "联网搜索", "搜索引擎选择、Tavily API Key 与网站黑名单") { detail = "web_search" }
                 KimiDivider()
                 KimiMenuRow(Icons.Default.Folder, "工作目录", "当前：$workspaceDisplayName") { detail = "workspace" }
                 KimiDivider()
@@ -1327,6 +1329,81 @@ internal fun WebSearchSettings(
     externalRevision: Int = 0,
     onChanged: () -> Unit,
 ) {
+    var tavilyKey by rememberSaveable(externalRevision) { mutableStateOf(settings.tavilyApiKey) }
+    var selectedProvider by rememberSaveable(externalRevision) { mutableStateOf(settings.webSearchProvider) }
+    var tavilyKeyVisible by remember { mutableStateOf(false) }
+
+    KimiCardBox {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Default.TravelExplore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f)) {
+                Text("搜索引擎", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "选择联网搜索使用的后端。Tavily 需要 API Key。",
+                    color = KimiMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        KimiDivider()
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf(
+                AppSettings.WEB_SEARCH_PROVIDER_WEBVIEW to "WebView 抓取",
+                AppSettings.WEB_SEARCH_PROVIDER_TAVILY to "Tavily",
+            ).forEach { (value, label) ->
+                FilterChip(
+                    selected = selectedProvider == value,
+                    onClick = {
+                        selectedProvider = value
+                        settings.webSearchProvider = value
+                        onChanged()
+                    },
+                    label = { Text(label) },
+                )
+            }
+        }
+        if (selectedProvider == AppSettings.WEB_SEARCH_PROVIDER_TAVILY) {
+            Spacer(Modifier.height(4.dp))
+            OutlinedTextField(
+                value = tavilyKey,
+                onValueChange = { tavilyKey = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Tavily API Key") },
+                placeholder = { Text("tvly-...") },
+                singleLine = true,
+                visualTransformation = if (tavilyKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { tavilyKeyVisible = !tavilyKeyVisible }) {
+                        Icon(
+                            if (tavilyKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = null,
+                        )
+                    }
+                },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            )
+            Button(
+                onClick = {
+                    settings.tavilyApiKey = tavilyKey
+                    onChanged()
+                },
+                shape = KimiPillShape,
+            ) {
+                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("保存 API Key")
+            }
+            if (tavilyKey.isBlank()) {
+                Text(
+                    "需要 Tavily API Key 才能使用 Tavily 搜索。可在 app.tavily.com 免费获取。",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+
     var blacklist by rememberSaveable(externalRevision) { mutableStateOf(settings.webSearchBlacklistText) }
     var notice by remember { mutableStateOf("") }
     val blockedCount = remember(blacklist, externalRevision) {

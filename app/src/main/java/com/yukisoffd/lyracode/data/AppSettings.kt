@@ -331,6 +331,20 @@ class AppSettings(context: Context) {
             .mapNotNull(::normalizeWebSearchBlockedHost)
             .toSet()
 
+    var tavilyApiKey: String
+        get() = securePrefs.getString(KEY_TAVILY_API_KEY, "").orEmpty()
+        set(value) = securePrefs.edit().putString(KEY_TAVILY_API_KEY, value.trim()).apply()
+
+    var webSearchProvider: String
+        get() = plainPrefs.getString(KEY_WEB_SEARCH_PROVIDER, WEB_SEARCH_PROVIDER_WEBVIEW)
+            .orEmpty()
+            .ifBlank { WEB_SEARCH_PROVIDER_WEBVIEW }
+        set(value) = plainPrefs.edit().putString(
+            KEY_WEB_SEARCH_PROVIDER,
+            value.takeIf { it in listOf(WEB_SEARCH_PROVIDER_WEBVIEW, WEB_SEARCH_PROVIDER_TAVILY) }
+                ?: WEB_SEARCH_PROVIDER_WEBVIEW,
+        ).apply()
+
     fun systemPromptPresets(): List<SystemPromptPreset> {
         val custom = customSystemPrompts()
         val customConfigs = customSystemPromptConfigs()
@@ -1847,6 +1861,8 @@ class AppSettings(context: Context) {
         private const val KEY_SYSTEM_PROMPT_CONFIGS = "system_prompt_configs"
         private const val KEY_REASONING_DEPTH = "reasoning_depth"
         private const val KEY_WEB_SEARCH_BLACKLIST = "web_search_blacklist"
+        private const val KEY_TAVILY_API_KEY = "tavily_api_key"
+        private const val KEY_WEB_SEARCH_PROVIDER = "web_search_provider"
         private const val KEY_MCP_SERVERS = "mcp_servers"
         private const val KEY_LOCAL_MCP_SERVER = "local_mcp_server"
         private const val KEY_SSH_SERVERS = "ssh_servers"
@@ -1908,6 +1924,8 @@ class AppSettings(context: Context) {
         const val FILE_TRANSFER_FTP = "ftp"
         const val FILE_TRANSFER_FTPS = "ftps"
         const val FILE_TRANSFER_SFTP = "sftp"
+        const val WEB_SEARCH_PROVIDER_WEBVIEW = "webview_scrape"
+        const val WEB_SEARCH_PROVIDER_TAVILY = "tavily"
 
         fun normalizeFileTransferProtocol(value: String): String = when (value.trim().lowercase()) {
             FILE_TRANSFER_FTPS -> FILE_TRANSFER_FTPS

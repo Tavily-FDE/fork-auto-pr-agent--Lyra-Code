@@ -14,8 +14,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -50,6 +52,77 @@ class WebViewWebAgent(
         val cleanQuery = query.trim()
         require(cleanQuery.isNotBlank()) { "搜索关键词不能为空" }
         val maxResults = limit.coerceIn(1, 10)
+        if (settings.webSearchProvider == AppSettings.WEB_SEARCH_PROVIDER_TAVILY && settings.tavilyApiKey.isNotBlank()) {
+            return runCatching { tavilySearch(cleanQuery, maxResults) }
+                .onFailure { Log.w(TAG, "Tavily search failed, falling back to WebView", it) }
+                .getOrElse { webViewSearch(cleanQuery, maxResults) }
+        }
+        return webViewSearch(cleanQuery, maxResults)
+    }
+
+    private suspend fun tavilySearch(query: String, maxResults: Int): String = withContext(Dispatchers.IO) {
+        val blockedHosts = settings.webSearchBlockedHosts()
+        val requestBody = JSONObject().apply {
+            put("api_key", settings.tavilyApiKey)
+            put("query", query)
+            put("max_results", maxResults)
+            put("search_depth", "basic")
+            put("include_answer", false)
+            if (blockedHosts.isNotEmpty()) {
+                put("exclude_domains", JSONArray(blockedHosts.map { it.removePrefix("*.") }))
+            }
+        }
+        val request = Request.Builder()
+            .url(TAVILY_SEARCH_URL)
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        val responseBody = httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Tavily HTTP ${response.code}")
+            response.body?.string().orEmpty()
+        }
+        val json = JSONObject(responseBody)
+        val resultsArray = json.optJSONArray("results") ?: JSONArray()
+        val results = buildList {
+            for (i in 0 until resultsArray.length()) {
+                val item = resultsArray.optJSONObject(i) ?: continue
+                add(
+                    WebSearchResult(
+                        title = item.optString("title"),
+                        url = item.optString("url"),
+                        snippet = item.optString("content"),
+                        source = "Tavily",
+                        score = ((item.optDouble("score", 0.5) * 100).toInt()),
+                        reason = "Tavily 相关性评分",
+                    ),
+                )
+            }
+        }
+        if (results.isEmpty()) {
+            val blockedNote = if (blockedHosts.isNotEmpty()) " 已过滤黑名单域名: ${blockedHosts.joinToString(", ")}。" else ""
+            return@withContext "未找到可用搜索结果。$blockedNote provider=Tavily"
+        }
+        buildString {
+            appendLine("WEB_SEARCH_RESULTS schema=lyra_web_search_v2")
+            appendLine("query: $query")
+            appendLine("provider: Tavily")
+            if (blockedHosts.isNotEmpty()) appendLine("blocked_hosts: ${blockedHosts.joinToString(", ")}")
+            appendLine("guidance: 已按 Tavily 相关性评分排序。优先读取高分、官方/原始/权威来源；低分结果仅作补充，不要把搜索摘要当最终事实。")
+            results.take(maxResults).forEachIndexed { index, result ->
+                appendLine()
+                appendLine("result_${index + 1}:")
+                appendLine("title: ${result.title}")
+                appendLine("url: ${result.url}")
+                appendLine("source: ${result.source}")
+                appendLine("score: ${result.score}")
+                appendLine("reason: ${result.reason}")
+                appendLine("snippet: ${result.snippet.take(500)}")
+            }
+        }.trim()
+    }
+
+    private suspend fun webViewSearch(query: String, maxResults: Int): String {
+        val cleanQuery = query
         val engines = listOf(
             SearchEngine("Google", "https://www.google.com/search?hl=zh-CN&q=${Uri.encode(cleanQuery)}"),
             SearchEngine("Bing", "https://www.bing.com/search?q=${Uri.encode(cleanQuery)}"),
@@ -531,6 +604,7 @@ class WebViewWebAgent(
 
     companion object {
         private const val TAG = "LyraWebAgent"
+        private const val TAVILY_SEARCH_URL = "https://api.tavily.com/search"
         private val TRACKING_QUERY_PARAMS = setOf(
             "utm_source",
             "utm_medium",
